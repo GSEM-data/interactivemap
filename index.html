@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {
+            margin: 0;
+        }
+        #map {
+            height: 95vh;
+            width: 100%;
+        }
+        .icon-button {
+            position: absolute;
+            top: 10%;
+            left: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            z-index: 1000;
+            padding: 0;
+        }
+        .icon-button img {
+            width: 45px;
+            height: 45px;
+        }
+        .additional-buttons {
+            position: absolute;
+            top: 170px;
+            left: 10px;
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 1000;
+        }
+        .additional-buttons button {
+            padding: 10px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        .photo {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 900px;
+            height: 500px;
+            display: none;
+            z-index: 1000;
+        }
+        .photo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+              
+    </style>
+
+</head>
+<body>
+    <div id="map" style="width: 100%; height: 98vh;"></div>
+    <!-- Основная кнопка с внешним SVG -->
+    <button class="icon-button" onclick="toggleAdditionalButtons()">
+        <img src="Main.png" alt="Menu Icon">
+    </button>
+
+    <!-- Дополнительные кнопки -->
+    <div class="additional-buttons" id="additional-buttons">
+        <button data-photo="photo1.jpeg">Size of Fireball, Danger Zone and Impacted Zone (per Station)</button>
+        <button data-photo="photo2.jpeg">Induced Building Damage (per Station)</button>
+        <button data-photo="photo3.jpeg">Induced Human Injury (per Station)</button>
+    </div>
+
+    <!-- Контейнер для фото -->
+    <div class="photo" id="photo-container">
+        <img id="photo" src="" alt="Фото">
+    </div>
+
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([41.311081, 69.240562], 11);
+    
+        // Define basemaps
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        });
+    
+        const esriSatellite = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'Tiles © Esri & the GIS User Community'
+        });
+    
+        // Add default basemap to the map
+        osm.addTo(map);
+    
+        // Layer containers
+        const petrolStationsLayer = L.layerGroup(); // Layer for petrol stations
+        const explosionBufferLayer = L.layerGroup(); // Layer for explosion danger zones
+        const humanImpactBufferLayer = L.layerGroup(); // Layer for human impact zones
+        const BuildingImpactZonesLayer = L.layerGroup(); // Layer for Building impact zones
+
+        //Buildings in explosion danger zones for stations
+        const buildingType1Layer1 = L.layerGroup();
+        const buildingType1Layer2 = L.layerGroup();
+        const buildingType1Layer3 = L.layerGroup();
+
+        //Buildings in human impact zones 
+        const buildingType2Layer1 = L.layerGroup();
+        const buildingType2Layer2 = L.layerGroup();
+        const buildingType2Layer3 = L.layerGroup();
+        const buildingType2Layer4 = L.layerGroup();
+
+        //Building impact zones
+        const buildingType3Layer1 = L.layerGroup();
+        const buildingType3Layer2 = L.layerGroup();
+        const buildingType3Layer3 = L.layerGroup();
+        const buildingType3Layer4 = L.layerGroup();
+        const buildingType3Layer5 = L.layerGroup();
+        const buildingType3Layer6 = L.layerGroup();
+
+
+
+        // Helper function for points
+        function createPointLayer(data) {
+            return L.geoJSON(data, {
+                pointToLayer: (feature, latlng) => {
+                    return L.circleMarker(latlng, {
+                        radius: 4,
+                        fillColor: "#ff7800", // Fixed color for points
+                        color: "#000",       // Border color
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+                },
+                onEachFeature: (feature, layer) => {
+                    if (feature.properties) {
+                        let popupContent = '<strong>Attributes:</strong><br>';
+                        for (const key in feature.properties) {
+                            popupContent += `<strong>${key}:</strong> ${feature.properties[key]}<br>`;
+                        }
+                        layer.bindPopup(popupContent);
+                    }
+                }
+            });
+        }
+    
+        // Helper function for buffer zones
+        function createBufferLayer(data) {
+            // Sort the GeoJSON data by radius (ascending order)
+            const sortedData = data.features.sort((a, b) => {
+                const radiusA = a.properties.Radius || 0; // Use radius from properties, default to 0 if not available
+                const radiusB = b.properties.Radius || 0;
+                return radiusA - radiusB; // Sort in ascending order (small radius first)
+            });
+
+            return L.geoJSON({ type: "FeatureCollection", features: sortedData }, {
+                style: feature => {
+                    const Radius = feature.properties.Radius || 0;
+                    const fillOpacity = Radius < 100 ? 0.7 : 0.3; // Example: smaller buffers more opaque
+                    return {
+                        color: "#000",
+                        weight: 2,
+                        opacity: 1.0,
+                        fillColor: feature.properties.color || "#cccccc", // Use 'color' attribute or default to gray
+                        fillOpacity: fillOpacity // Adjust fill opacity based on radius
+                    };
+                },
+                onEachFeature: (feature, layer) => {
+                    if (feature.properties) {
+                        let popupContent = '<strong>Attributes:</strong><br>';
+                        for (const key in feature.properties) {
+                            popupContent += `<strong>${key}:</strong> ${feature.properties[key]}<br>`;
+                        }
+                        layer.bindPopup(popupContent);
+                    }
+                }
+            });
+        }
+
+
+
+    
+        // Load GeoJSON layers
+        function loadGeoJSON(url, layerGroup, createLayerFunction) {
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    const layer = createLayerFunction(data);
+                    layerGroup.addLayer(layer); // Add GeoJSON layer to the specific layer group
+    
+                    // Ensure Petrol Stations always on top
+                    if (layerGroup === petrolStationsLayer) {
+                        layer.bringToFront(); // Bring points to front
+                    }
+                })
+                .catch(error => console.error(`Error loading ${url}:`, error));
+        }
+    
+        // Load Petrol Stations (points)
+        loadGeoJSON('Petrol_Stations.geojson', petrolStationsLayer, createPointLayer);
+    
+        // Load Explosion Danger Zones (buffer)
+        loadGeoJSON('Explosion_danger_zones_bufer.geojson', explosionBufferLayer, createBufferLayer);
+    
+        // Load Human Impact Zones (buffer)
+        loadGeoJSON('2_Human_impact_zones.geojson', humanImpactBufferLayer, createBufferLayer);
+        
+        // Load Building Impact Zones (buffer)
+        loadGeoJSON('3_Building_impact_zones.geojson', BuildingImpactZonesLayer, createBufferLayer);
+        
+        // Load Building Impact Zones (buffer)
+        loadGeoJSON('Fireball_Zone_1.geojson', buildingType1Layer1, createBufferLayer);
+        loadGeoJSON('Danger_Zone_2.geojson', buildingType1Layer2, createBufferLayer);
+        loadGeoJSON('Adjusted_Danger_Zone_3.geojson', buildingType1Layer3, createBufferLayer);
+        
+        // Load Buildings in human impact zones 
+        loadGeoJSON('1st_Degree_Burns_Zone.geojson', buildingType2Layer1, createBufferLayer);
+        loadGeoJSON('2nd_Degree_Burns_Zone.geojson', buildingType2Layer2, createBufferLayer);
+        loadGeoJSON('3rd_Degree_Burns_Zone.geojson', buildingType2Layer3, createBufferLayer);
+        loadGeoJSON('Painful_Sensation_Zone.geojson', buildingType2Layer4, createBufferLayer);
+        
+        // Load Building impact zones
+        loadGeoJSON('Total_Destruction_Zone.geojson', buildingType3Layer1, createBufferLayer);
+        loadGeoJSON('50_Destruction_Zone.geojson', buildingType3Layer2, createBufferLayer);
+        loadGeoJSON('Medium_Damage_Zone.geojson', buildingType3Layer3, createBufferLayer);
+        loadGeoJSON('Moderate_Damage_Zone.geojson', buildingType3Layer4, createBufferLayer);
+        loadGeoJSON('Pressure_Wave_Damage_Zone.geojson', buildingType3Layer5, createBufferLayer);
+        loadGeoJSON('Minor_Damage_Zone.geojson', buildingType3Layer6, createBufferLayer);
+        
+        // Add layer control
+        const baseMaps = {
+            "OpenStreetMap": osm,
+            "ESRI Satellite": esriSatellite
+        };
+    
+        const overlayMaps1 = {
+            "Petrol Stations": petrolStationsLayer,
+            "Explosion Danger Zones": explosionBufferLayer,
+            "Human Injury Zones": humanImpactBufferLayer,
+            "Building Damage Zones": BuildingImpactZonesLayer
+        };
+
+        const overlayMaps2 = {
+            "Fireball zone ": buildingType1Layer1,
+            "Danger zone": buildingType1Layer2,
+            "Impacted zone": buildingType1Layer3,
+            "First degree burns zone": buildingType2Layer1,
+            "Second degree burns zone": buildingType2Layer2,
+            "Third degree burns zone": buildingType2Layer3,
+            "Painful sensation zone": buildingType2Layer4,
+            "Total destruction zone": buildingType3Layer1,
+            "50% destruction zone": buildingType3Layer2,
+            "Medium damage zone": buildingType3Layer3,
+            "Moderate damage zone": buildingType3Layer4,
+            "Pressure wave damage zone": buildingType3Layer5,
+            "Minor damage zone": buildingType3Layer6
+        };
+
+        // Add petrolStationsLayer to the map by default
+        petrolStationsLayer.addTo(map);
+               
+        // Grouped overlays for layer groups
+        const groupedOverlays1 = {
+            "Group 1": overlayMaps1
+        };
+
+        const groupedOverlays2 = {
+            "Group 2": overlayMaps2
+        };
+
+        // Add two layer controls, each with its own group of overlays
+        L.control.layers(baseMaps, overlayMaps1, groupedOverlays1, { position: 'topright' }).addTo(map);
+        L.control.layers(baseMaps, overlayMaps2, groupedOverlays2, { position: 'topright' }).addTo(map);
+       // L.control.layers(baseMaps, overlayMaps, , { position: 'topright' }).addTo(map);
+        
+        // Ensure points are always on top when toggling visibility
+        map.on('overlayadd', function (event) {
+            if (event.layer === petrolStationsLayer) {
+                petrolStationsLayer.eachLayer(layer => layer.bringToFront());
+            }
+        });
+        
+
+        // Функция для отображения дополнительных кнопок
+        function toggleAdditionalButtons() {
+            const buttons = document.getElementById('additional-buttons');
+            if (buttons.style.display === 'flex') {
+                buttons.style.display = 'none';
+            } else {
+                buttons.style.display = 'flex';
+            }
+        }
+
+        function togglePhoto(url) {
+            const photoContainer = document.getElementById('photo-container');
+            const photo = document.getElementById('photo');
+
+            // Если фото уже отображается
+            if (photoContainer.style.display === 'block') {
+                // Проверяем, соответствует ли текущее фото переданному URL
+                const currentPhotoUrl = photo.src.split('/').pop(); // Извлекаем имя файла из пути
+                if (currentPhotoUrl === url) {
+                    // Если URL совпадает, скрываем фото
+                    photoContainer.style.display = 'none';
+                    return;
+                }
+            }
+
+            // В остальных случаях отображаем фото
+            photo.src = url;
+            photoContainer.style.display = 'block';
+        }
+
+
+        // Привязка событий к кнопкам внутри additional-buttons
+        document.querySelectorAll('.additional-buttons button').forEach(button => {
+            button.addEventListener('click', () => {
+                const url = button.getAttribute('data-photo'); // Получаем URL из data-photo
+                togglePhoto(url);
+            });
+        });
+
+
+
+
+
+
+    </script>
+    
+    
+    
+</body>
+</html>
